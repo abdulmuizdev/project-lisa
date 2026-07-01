@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -109,11 +110,24 @@ def save_capture(frame) -> Path:
     return filename
 
 
-def print_image(path: Path) -> None:
-    if sys.platform != "win32":
-        print(f"Printing skipped on {sys.platform} (Windows only).")
-        return
+def _default_cups_printer() -> str:
+    try:
+        result = subprocess.run(
+            ["lpstat", "-d"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return "default"
 
+    if result.returncode != 0 or ":" not in result.stdout:
+        return "default"
+
+    return result.stdout.split(":", 1)[1].strip() or "default"
+
+
+def print_image_windows(path: Path) -> None:
     try:
         import win32con
         import win32print
@@ -153,6 +167,32 @@ def print_image(path: Path) -> None:
         print(f"Printing {path} to {printer_name}...")
     except Exception as exc:
         print(f"Could not print {path}: {exc}")
+
+
+def print_image_linux(path: Path) -> None:
+    printer_name = _default_cups_printer()
+    try:
+        subprocess.run(
+            ["lp", "-o", "fit-to-page", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        print(f"Printing {path} to {printer_name}...")
+    except FileNotFoundError:
+        print("Could not print: 'lp' not found. Install CUPS (e.g. apt install cups).")
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or str(exc)).strip()
+        print(f"Could not print {path}: {detail}")
+
+
+def print_image(path: Path) -> None:
+    if sys.platform == "win32":
+        print_image_windows(path)
+    elif sys.platform == "linux":
+        print_image_linux(path)
+    else:
+        print(f"Printing skipped on {sys.platform} (Windows and Linux only).")
 
 
 def insert_coin(state: BoothState) -> None:
